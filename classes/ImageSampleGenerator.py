@@ -144,18 +144,18 @@ class ImageSampleGenerator:
             gen_img, annotation_part = self.generate_image(new_img, sample_list, label_list)
             if aug:
                 gen_img = self.aug_image(gen_img)
-            filename = os.path.join(self.output_img_dir, f'{i}.bmp')
-            label_filename = os.path.join(self.output_label_dir, f'{i}.txt')
+            filename = os.path.join(self.output_img_dir, f'_{i}.jpg')
+            label_filename = os.path.join(self.output_label_dir, f'_{i}.txt')
             filename_list.append(filename)
             annotation_part = np.array(annotation_part)
             annotation_part_df = pd.DataFrame({
                 'label': np.uint8(annotation_part[:, 0]),
-                'x_center': annotation_part[:, 1],
-                'y_center': annotation_part[:, 2],
-                'width': annotation_part[:, 3],
-                'height': annotation_part[:, 4],
+                'x_center': np.around(annotation_part[:, 1], 5),
+                'y_center': np.around(annotation_part[:, 2], 5),
+                'width': np.around(annotation_part[:, 3], 5),
+                'height': np.around(annotation_part[:, 4], 5),
             })
-            annotation_part_df.to_csv(label_filename, index=False, header=False)
+            annotation_part_df.to_csv(label_filename, index=False, header=False, sep=' ')
             cv2.imwrite(filename, gen_img)
 
         train_list, test_list = train_test_split(filename_list, test_size=0.33, random_state=42)
