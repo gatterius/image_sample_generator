@@ -43,7 +43,8 @@ class ImageSampleGenerator:
         back_filename_list = os.listdir(back_dir)
         for back_file in back_filename_list:
             back = cv2.imread(os.path.join(back_dir, back_file), 0)
-            back = back[0:back.shape[0] // self.sample_x_size * self.sample_x_size,
+            back = back[
+                   0:back.shape[0] // self.sample_x_size * self.sample_x_size,
                    0:back.shape[1] // self.sample_y_size * self.sample_y_size]
             back_list.append(back)
         self.back_list = back_list
@@ -134,7 +135,6 @@ class ImageSampleGenerator:
         Returns:
             nothing, generated images are written down into output directory
         """
-        annotation = pd.DataFrame(columns=['file', 'label', 'x_center', 'y_center', 'width', 'height'])
         filename_list = []
         for i in tqdm(range(img_count)):
             new_img = self.back_list[randint(0, len(self.back_list) - 1)].copy()
