@@ -103,7 +103,13 @@ class ImageSampleGenerator:
         for i in range(0, len(sample_list)):
             x = coord_list[i][0]
             y = coord_list[i][1]
-            label = [label_list[i], x, y]
+            label = [
+                label_list[i],
+                x + (self.sample_x_size // 2),
+                y + (self.sample_y_size // 2),
+                self.sample_x_size,
+                self.sample_y_size,
+            ]
             back_img[x:x + self.sample_x_size, y:y + self.sample_y_size] = \
                 self.place_digit(back_img[x:x + self.sample_x_size, y:y + self.sample_x_size], sample_list[i])
             annotation_list.append(label)
@@ -112,57 +118,37 @@ class ImageSampleGenerator:
     def aug_image(self, image):
         return self.aug_seq(images=image)
 
-    def generate_dataset(self, img_count, sample_count):
+    def generate_dataset(self, img_count, sample_count, aug=True):
         """
         Generates a set of images of given size
 
         Parameters:
             -img_count: number of images to be generated
+            -sample_count: number of samples to be placed on each image
+            -aug: if generated images should be augmented
 
         Returns:
-            nothing
+            nothing, generated images are written down into output directory
         """
-        annotation = pd.DataFrame(columns=['file', 'label', 'x_min', 'y_min'])
+        annotation = pd.DataFrame(columns=['file', 'label', 'x_center', 'y_center', 'width', 'height'])
         for i in range(img_count):
             new_img = self.back_list[randint(0, len(self.back_list) - 1)].copy()
             sample_index_list = [randint(0, self.sample_data.shape[0]) for a in range(sample_count)]
             sample_list = [self.sample_data[i] for i in sample_index_list]
             label_list = [self.sample_labels[i] for i in sample_index_list]
             gen_img, annotation_part = self.generate_image(new_img, sample_list, label_list)
+            if aug:
+                gen_img = self.aug_image(gen_img)
             filename = os.path.join(self.output_dir, f'{i}.bmp')
+            annotation_part = np.uint8(np.array(annotation_part))
             annotation_part_df = pd.DataFrame({
                 'file': filename,
-                'label': np.uint8(np.array(annotation_part)[:, 0]),
-                'x_min': np.uint8(np.array(annotation_part)[:, 1]),
-                'y_min': np.uint8(np.array(annotation_part)[:, 2])})
-            cv2.imwrite(filename, gen_img)
-            annotation = annotation.append(annotation_part_df, ignore_index=True)
-        annotation.to_csv('annotation.csv', index=False)
-
-    def generate_aug_dataset(self, img_count, sample_count):
-        """
-        Generates a set of images of given size
-
-        Parameters:
-            -img_count: number of images to be generated
-
-        Returns:
-            nothing
-        """
-        annotation = pd.DataFrame(columns=['file', 'label', 'x_min', 'y_min'])
-        for i in range(img_count):
-            new_img = self.back_list[randint(0, len(self.back_list) - 1)].copy()
-            sample_index_list = [randint(0, self.sample_data.shape[0]) for a in range(sample_count)]
-            sample_list = [self.sample_data[i] for i in sample_index_list]
-            label_list = [self.sample_labels[i] for i in sample_index_list]
-            gen_img, annotation_part = self.generate_image(new_img, sample_list, label_list)
-            gen_img = self.aug_image(gen_img)
-            filename = os.path.join(self.output_dir, f'{i}.bmp')
-            annotation_part_df = pd.DataFrame({
-                'file': filename,
-                'label': np.uint8(np.array(annotation_part)[:, 0]),
-                'x_min': np.uint8(np.array(annotation_part)[:, 1]),
-                'y_min': np.uint8(np.array(annotation_part)[:, 2])})
+                'label': annotation_part[:, 0],
+                'x_center': annotation_part[:, 1],
+                'y_center': annotation_part[:, 2],
+                'width': annotation_part[:, 3],
+                'height': annotation_part[:, 4],
+            })
             cv2.imwrite(filename, gen_img)
             annotation = annotation.append(annotation_part_df, ignore_index=True)
         annotation.to_csv('annotation.csv', index=False)
