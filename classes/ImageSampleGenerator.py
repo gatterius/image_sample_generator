@@ -4,11 +4,14 @@ from random import randint
 import numpy as np
 from itertools import product
 import os
+import imgaug as ia
+import imgaug.augmenters as iaa
+ia.seed(42)
 
 
 class ImageSampleGenerator:
     """
-    This is a class for generating photos by placing a number of samples randomly on given backgrounds.
+    This is a class for generating images by placing a number of samples randomly on given backgrounds.
 
     Attributes:
         back_dir: path to the directory where background images are stored
@@ -19,6 +22,14 @@ class ImageSampleGenerator:
         sample_y_size: height of samples
     """
     def __init__(self, back_dir, output_dir, sample_data, sample_labels, sample_x_size, sample_y_size):
+        self.aug_seq = iaa.Sequential([
+            iaa.Sometimes(0.5,
+                          iaa.GaussianBlur(sigma=(0, 0.5))
+                          ),
+            iaa.ContrastNormalization((0.75, 1.5)),
+            iaa.AdditiveGaussianNoise(loc=0, scale=(0.0, 0.05 * 255), per_channel=0.5),
+            iaa.Multiply((0.8, 1.2), per_channel=0.2),
+        ], random_order=True)
         self.sample_data = sample_data
         self.sample_x_size = sample_x_size
         self.sample_y_size = sample_y_size
@@ -74,9 +85,9 @@ class ImageSampleGenerator:
             chosen_coord_pairs.append((new_pair[0] * self.sample_x_size, new_pair[1] * self.sample_y_size))
         return chosen_coord_pairs
 
-    def generate_photo(self, back_img, sample_list, label_list):
+    def generate_image(self, back_img, sample_list, label_list):
         """
-        Places given number of digits on image using random coordinates to generate a photo
+        Places given number of digits on image using random coordinates to generate a image
 
         Parameters:
             -back_img: background image
@@ -98,7 +109,10 @@ class ImageSampleGenerator:
             annotation_list.append(label)
         return back_img, annotation_list
 
-    def generate_dataset(self, img_count):
+    def aug_image(self, image):
+        return self.aug_seq(images=image)
+
+    def generate_dataset(self, img_count, sample_count):
         """
         Generates a set of images of given size
 
@@ -111,10 +125,38 @@ class ImageSampleGenerator:
         annotation = pd.DataFrame(columns=['file', 'label', 'x_min', 'y_min'])
         for i in range(img_count):
             new_img = self.back_list[randint(0, len(self.back_list) - 1)].copy()
-            sample_index_list = [randint(0, self.sample_data.shape[0]) for a in range(img_count)]
+            sample_index_list = [randint(0, self.sample_data.shape[0]) for a in range(sample_count)]
             sample_list = [self.sample_data[i] for i in sample_index_list]
             label_list = [self.sample_labels[i] for i in sample_index_list]
-            gen_img, annotation_part = self.generate_photo(new_img, sample_list, label_list)
+            gen_img, annotation_part = self.generate_image(new_img, sample_list, label_list)
+            filename = os.path.join(self.output_dir, f'{i}.bmp')
+            annotation_part_df = pd.DataFrame({
+                'file': filename,
+                'label': np.uint8(np.array(annotation_part)[:, 0]),
+                'x_min': np.uint8(np.array(annotation_part)[:, 1]),
+                'y_min': np.uint8(np.array(annotation_part)[:, 2])})
+            cv2.imwrite(filename, gen_img)
+            annotation = annotation.append(annotation_part_df, ignore_index=True)
+        annotation.to_csv('annotation.csv', index=False)
+
+    def generate_aug_dataset(self, img_count, sample_count):
+        """
+        Generates a set of images of given size
+
+        Parameters:
+            -img_count: number of images to be generated
+
+        Returns:
+            nothing
+        """
+        annotation = pd.DataFrame(columns=['file', 'label', 'x_min', 'y_min'])
+        for i in range(img_count):
+            new_img = self.back_list[randint(0, len(self.back_list) - 1)].copy()
+            sample_index_list = [randint(0, self.sample_data.shape[0]) for a in range(sample_count)]
+            sample_list = [self.sample_data[i] for i in sample_index_list]
+            label_list = [self.sample_labels[i] for i in sample_index_list]
+            gen_img, annotation_part = self.generate_image(new_img, sample_list, label_list)
+            gen_img = self.aug_image(gen_img)
             filename = os.path.join(self.output_dir, f'{i}.bmp')
             annotation_part_df = pd.DataFrame({
                 'file': filename,
