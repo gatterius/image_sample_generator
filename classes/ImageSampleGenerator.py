@@ -6,6 +6,8 @@ from itertools import product
 import os
 import imgaug as ia
 import imgaug.augmenters as iaa
+from sklearn.model_selection import train_test_split
+from tqdm import tqdm
 ia.seed(42)
 
 
@@ -15,13 +17,14 @@ class ImageSampleGenerator:
 
     Attributes:
         back_dir: path to the directory where background images are stored
-        output_dir:path to the directory where generated images are placed
+        output_img_dir: path to the directory where generated images are placed
+        output_label_dir: path to the directory where generated labels are placed
         sample_data: a set of samples to be placed on background images
         sample_labels: a set of labels of sample images
         sample_x_size: width of samples
         sample_y_size: height of samples
     """
-    def __init__(self, back_dir, output_dir, sample_data, sample_labels, sample_x_size, sample_y_size):
+    def __init__(self, back_dir, output_img_dir, output_label_dir, sample_data, sample_labels, sample_x_size, sample_y_size):
         self.aug_seq = iaa.Sequential([
             iaa.Sometimes(0.5,
                           iaa.GaussianBlur(sigma=(0, 0.5))
@@ -33,7 +36,8 @@ class ImageSampleGenerator:
         self.sample_data = sample_data
         self.sample_x_size = sample_x_size
         self.sample_y_size = sample_y_size
-        self.output_dir = output_dir
+        self.output_img_dir = output_img_dir
+        self.output_label_dir = output_label_dir
         self.sample_labels = sample_labels
         back_list = []
         back_filename_list = os.listdir(back_dir)
@@ -105,10 +109,10 @@ class ImageSampleGenerator:
             y = coord_list[i][1]
             label = [
                 label_list[i],
-                x + (self.sample_x_size // 2),
-                y + (self.sample_y_size // 2),
-                self.sample_x_size,
-                self.sample_y_size,
+                (x + (self.sample_x_size // 2)) / back_img.shape[0],
+                (y + (self.sample_y_size // 2)) / back_img.shape[1],
+                self.sample_x_size / back_img.shape[0],
+                self.sample_y_size / back_img.shape[1],
             ]
             back_img[x:x + self.sample_x_size, y:y + self.sample_y_size] = \
                 self.place_digit(back_img[x:x + self.sample_x_size, y:y + self.sample_x_size], sample_list[i])
@@ -131,24 +135,42 @@ class ImageSampleGenerator:
             nothing, generated images are written down into output directory
         """
         annotation = pd.DataFrame(columns=['file', 'label', 'x_center', 'y_center', 'width', 'height'])
-        for i in range(img_count):
+        filename_list = []
+        for i in tqdm(range(img_count)):
             new_img = self.back_list[randint(0, len(self.back_list) - 1)].copy()
-            sample_index_list = [randint(0, self.sample_data.shape[0]) for a in range(sample_count)]
+            sample_index_list = [randint(0, self.sample_data.shape[0]-1) for a in range(sample_count)]
             sample_list = [self.sample_data[i] for i in sample_index_list]
             label_list = [self.sample_labels[i] for i in sample_index_list]
             gen_img, annotation_part = self.generate_image(new_img, sample_list, label_list)
             if aug:
                 gen_img = self.aug_image(gen_img)
-            filename = os.path.join(self.output_dir, f'{i}.bmp')
-            annotation_part = np.uint8(np.array(annotation_part))
+            filename = os.path.join(self.output_img_dir, f'{i}.bmp')
+            label_filename = os.path.join(self.output_label_dir, f'{i}.txt')
+            filename_list.append(filename)
+            annotation_part = np.array(annotation_part)
             annotation_part_df = pd.DataFrame({
-                'file': filename,
-                'label': annotation_part[:, 0],
+                'label': np.uint8(annotation_part[:, 0]),
                 'x_center': annotation_part[:, 1],
                 'y_center': annotation_part[:, 2],
                 'width': annotation_part[:, 3],
                 'height': annotation_part[:, 4],
             })
+            annotation_part_df.to_csv(label_filename, index=False, header=False)
             cv2.imwrite(filename, gen_img)
-            annotation = annotation.append(annotation_part_df, ignore_index=True)
-        annotation.to_csv('annotation.csv', index=False)
+
+        train_list, test_list = train_test_split(filename_list, test_size=0.33, random_state=42)
+        train_out = ''
+        test_out = ''
+        for file in train_list:
+            train_out += str(file) + '\n'
+        for file in test_list:
+            test_out += str(file) + '\n'
+
+        text_file = open("data/train.txt", "w")
+        res = text_file.write(train_out)
+        text_file.close()
+        text_file = open("data/test.txt", "w")
+        res = text_file.write(test_out)
+        text_file.close()
+
+
