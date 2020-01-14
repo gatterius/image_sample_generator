@@ -10,6 +10,9 @@ from sklearn.model_selection import train_test_split
 from tqdm import tqdm
 ia.seed(42)
 
+# TODO
+# Update generation so samples can have arbitrary size
+
 
 class ImageSampleGenerator:
     """
