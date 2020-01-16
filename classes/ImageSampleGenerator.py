@@ -27,7 +27,8 @@ class ImageSampleGenerator:
         sample_x_size: width of samples
         sample_y_size: height of samples
     """
-    def __init__(self, back_dir, output_img_dir, output_label_dir, sample_data, sample_labels, sample_x_size, sample_y_size):
+    def __init__(self, back_dir, output_img_dir, output_label_dir,
+                 sample_data, sample_labels, sample_x_size, sample_y_size, sample_type, invert_samples):
         self.aug_seq = iaa.Sequential([
             iaa.Sometimes(0.5,
                           iaa.GaussianBlur(sigma=(0, 0.5))
@@ -42,6 +43,8 @@ class ImageSampleGenerator:
         self.output_img_dir = output_img_dir
         self.output_label_dir = output_label_dir
         self.sample_labels = sample_labels
+        self.sample_type = sample_type
+        self.invert_samples = invert_samples
         back_list = []
         back_filename_list = os.listdir(back_dir)
         for back_file in back_filename_list:
@@ -52,23 +55,37 @@ class ImageSampleGenerator:
             back_list.append(back)
         self.back_list = back_list
 
-    def place_digit(self, back_img_part, sample_img):
+    def place_sample(self, back_img_part, sample_img, type='jpg', invert=False):
         """
         Places digit on a given image part, inverting original image and placing only non-white pixels,
-        so background of digit is removed
+        so background of digit is removed. Two types of samples can be used: jpg with 3 channels (only non-white
+        pixels will be placed on background image) and png with 4 channels (only pixels with non-zero values in
+        alpha channel will be placed on background image). In png case, samples have to have only 0 or 255 in the
+        alpha channel, as it is simply removed before sample being placed on the background and values in range 1-254
+        can lead to sample disruptions
 
         Parameters:
             -back_img_part: a rectangle from background image where sample will be placed
             -sample_img: a sample to be placed on the background
+            -type: format of the sample, jpg or png can be used
+            -invert: if sample should be inverted before being placed
 
         Returns:
             -back_img_part: a rectangle from background image with non-white pixels of sample placed over it
         """
-        sample_img = cv2.bitwise_not(sample_img)
-        non_white_pixels = np.where(sample_img != 255)
-        for i in range(len(non_white_pixels[0])):
-            back_img_part[non_white_pixels[0][i], non_white_pixels[1][i]] = sample_img[
-                non_white_pixels[0][i], non_white_pixels[1][i]]
+        if invert and type == 'png':
+            sample_img[:, :, 0:3] = cv2.bitwise_not(sample_img[:, :, 0:3])
+        elif invert and type == 'jpg':
+            sample_img = cv2.bitwise_not(sample_img)
+        if type == 'jpg':
+            non_white_pixels = np.where(sample_img != 255)
+        elif type == 'png':
+            non_white_pixels = np.where(sample_img[:, :, 3] != 0)
+            sample_img = sample_img[:, :, 0:3]
+        else:
+            print('Given sample type is not defined, use \'jpg\' or \'png\'')
+            exit()
+        back_img_part[non_white_pixels] = sample_img[non_white_pixels]
         return back_img_part
 
     def generate_random_coordinates(self, img_shape, coord_num):
@@ -119,7 +136,8 @@ class ImageSampleGenerator:
                 self.sample_y_size / back_img.shape[1],
             ]
             back_img[x:x + self.sample_x_size, y:y + self.sample_y_size] = \
-                self.place_digit(back_img[x:x + self.sample_x_size, y:y + self.sample_x_size], sample_list[i])
+                self.place_sample(back_img[x:x + self.sample_x_size, y:y + self.sample_x_size],
+                                  sample_list[i], self.sample_type, self.invert_samples)
             annotation_list.append(label)
         return back_img, annotation_list
 
