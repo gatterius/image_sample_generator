@@ -10,9 +10,6 @@ from sklearn.model_selection import train_test_split
 from tqdm import tqdm
 ia.seed(42)
 
-# TODO
-# Update generation so samples can have arbitrary size
-
 
 class ImageSampleGenerator:
     """
@@ -26,9 +23,13 @@ class ImageSampleGenerator:
         sample_labels: a set of labels of sample images
         sample_x_size: width of samples
         sample_y_size: height of samples
+        sample_type: 'jpg' if samples have 3 channels, 'png' if samples have 4 channels
+        invert_sample: if samples must be inverted before being placed
+        mode: if 'box', bounding boxes coordinates are returned as annotation; if 'segment', mask is returned as
+        annotation
     """
-    def __init__(self, back_dir, output_img_dir, output_label_dir,
-                 sample_data, sample_labels, sample_x_size, sample_y_size, sample_type, invert_samples):
+    def __init__(self, back_dir, output_img_dir, output_label_dir, sample_data, sample_labels, sample_x_size,
+                 sample_y_size, sample_type, invert_samples, mode):
         self.aug_seq = iaa.Sequential([
             iaa.Sometimes(0.5,
                           iaa.GaussianBlur(sigma=(0, 0.5))
@@ -45,6 +46,7 @@ class ImageSampleGenerator:
         self.sample_labels = sample_labels
         self.sample_type = sample_type
         self.invert_samples = invert_samples
+        self.mode = mode
         back_list = []
         back_filename_list = os.listdir(back_dir)
         for back_file in back_filename_list:
@@ -55,7 +57,7 @@ class ImageSampleGenerator:
             back_list.append(back)
         self.back_list = back_list
 
-    def place_sample(self, back_img_part, sample_img, type='jpg', invert=False):
+    def place_sample(self, back_img_part, sample_img):
         """
         Places digit on a given image part, inverting original image and placing only non-white pixels,
         so background of digit is removed. Two types of samples can be used: jpg with 3 channels (only non-white
@@ -67,26 +69,27 @@ class ImageSampleGenerator:
         Parameters:
             -back_img_part: a rectangle from background image where sample will be placed
             -sample_img: a sample to be placed on the background
-            -type: format of the sample, jpg or png can be used
-            -invert: if sample should be inverted before being placed
 
         Returns:
             -back_img_part: a rectangle from background image with non-white pixels of sample placed over it
         """
-        if invert and type == 'png':
+        if self.invert_samples and self.sample_type == 'png':
             sample_img[:, :, 0:3] = cv2.bitwise_not(sample_img[:, :, 0:3])
-        elif invert and type == 'jpg':
+        elif self.invert_samples and self.sample_type == 'jpg':
             sample_img = cv2.bitwise_not(sample_img)
-        if type == 'jpg':
+        if self.sample_type == 'jpg':
             non_white_pixels = np.where(sample_img != 255)
-        elif type == 'png':
+        elif self.sample_type == 'png':
             non_white_pixels = np.where(sample_img[:, :, 3] != 0)
             sample_img = sample_img[:, :, 0:3]
         else:
             print('Given sample type is not defined, use \'jpg\' or \'png\'')
             exit()
         back_img_part[non_white_pixels] = sample_img[non_white_pixels]
-        return back_img_part
+        if self.mode == 'box':
+            return back_img_part
+        elif self.mode == 'segment':
+            return back_img_part, non_white_pixels
 
     def generate_random_coordinates(self, img_shape, coord_num):
         """
@@ -119,34 +122,51 @@ class ImageSampleGenerator:
             -sample_list: set of samples to be placed on background image
             -label_list: labels for samples
 
+
         Returns:
             -back_img: generated image
             -annotation_list: annotation labels for placed samples
         """
         coord_list = self.generate_random_coordinates(back_img.shape, len(sample_list))
-        annotation_list = []
-        for i in range(0, len(sample_list)):
-            x = coord_list[i][0]
-            y = coord_list[i][1]
-            label = [
-                label_list[i],
-                (x + (self.sample_x_size // 2)) / back_img.shape[0],
-                (y + (self.sample_y_size // 2)) / back_img.shape[1],
-                self.sample_x_size / back_img.shape[0],
-                self.sample_y_size / back_img.shape[1],
-            ]
-            back_img[x:x + self.sample_x_size, y:y + self.sample_y_size] = \
-                self.place_sample(back_img[x:x + self.sample_x_size, y:y + self.sample_x_size],
-                                  sample_list[i], self.sample_type, self.invert_samples)
-            annotation_list.append(label)
-        return back_img, annotation_list
+
+        if self.mode == 'box':
+            annotation_list = []
+            for i in range(0, len(sample_list)):
+                x = coord_list[i][0]
+                y = coord_list[i][1]
+                label = [
+                    label_list[i],
+                    (x + (self.sample_x_size // 2)) / back_img.shape[0],
+                    (y + (self.sample_y_size // 2)) / back_img.shape[1],
+                    self.sample_x_size / back_img.shape[0],
+                    self.sample_y_size / back_img.shape[1],
+                ]
+                back_img[x:x + self.sample_x_size, y:y + self.sample_y_size] = \
+                    self.place_sample(back_img[x:x + self.sample_x_size, y:y + self.sample_x_size],
+                                      sample_list[i])
+                annotation_list.append(label)
+            return back_img, annotation_list
+
+        elif self.mode == 'segment':
+            annotation = np.zeros(back_img.shape)
+            for i in range(0, len(sample_list)):
+                x_0 = coord_list[i][0]
+                x_1 = x_0 + self.sample_x_size
+                y_0 = coord_list[i][1]
+                y_1 = y_0 + self.sample_y_size
+                back_img[x_0:x_1, y_0:y_1], annotation_coords = \
+                    self.place_sample(back_img[x_0:x_1, y_0:y_1], sample_list[i])
+                annotation_coords = (x_0 + annotation_coords[0], y_0 + annotation_coords[1])
+                annotation[annotation_coords] = 255
+            return back_img, annotation
 
     def aug_image(self, image):
         return self.aug_seq(images=image)
 
     def generate_dataset(self, img_count, sample_count, aug=True):
         """
-        Generates a set of images of given size
+        Generates an image set of given size by placing samples randomly on them and generating annotations in 2 modes:
+        returning bounding boxes coordinates or returning segmentation masks.
 
         Parameters:
             -img_count: number of images to be generated
@@ -154,7 +174,7 @@ class ImageSampleGenerator:
             -aug: if generated images should be augmented
 
         Returns:
-            nothing, generated images are written down into output directory
+            nothing, generated images are written into output directory
         """
         filename_list = []
         for i in tqdm(range(img_count)):
@@ -162,22 +182,27 @@ class ImageSampleGenerator:
             sample_index_list = [randint(0, self.sample_data.shape[0]-1) for a in range(sample_count)]
             sample_list = [self.sample_data[i] for i in sample_index_list]
             label_list = [self.sample_labels[i] for i in sample_index_list]
-            gen_img, annotation_part = self.generate_image(new_img, sample_list, label_list)
+            gen_img, annotation = self.generate_image(new_img, sample_list, label_list)
             if aug:
                 gen_img = self.aug_image(gen_img)
             filename = os.path.join(self.output_img_dir, f'_{i}.jpg')
-            label_filename = os.path.join(self.output_label_dir, f'_{i}.txt')
             filename_list.append(filename)
-            annotation_part = np.array(annotation_part)
-            annotation_part_df = pd.DataFrame({
-                'label': np.uint8(annotation_part[:, 0]),
-                'x_center': np.around(annotation_part[:, 1], 5),
-                'y_center': np.around(annotation_part[:, 2], 5),
-                'width': np.around(annotation_part[:, 3], 5),
-                'height': np.around(annotation_part[:, 4], 5),
-            })
-            annotation_part_df.to_csv(label_filename, index=False, header=False, sep=' ')
             cv2.imwrite(filename, gen_img)
+
+            if self.mode == 'box':
+                label_filename = os.path.join(self.output_label_dir, f'_{i}.txt')
+                annotation = np.array(annotation)
+                annotation_df = pd.DataFrame({
+                    'label': np.uint8(annotation[:, 0]),
+                    'x_center': np.around(annotation[:, 1], 5),
+                    'y_center': np.around(annotation[:, 2], 5),
+                    'width': np.around(annotation[:, 3], 5),
+                    'height': np.around(annotation[:, 4], 5),
+                })
+                annotation_df.to_csv(label_filename, index=False, header=False, sep=' ')
+            elif self.mode == 'segment':
+                label_filename = os.path.join(self.output_label_dir, f'_{i}.bmp')
+                cv2.imwrite(label_filename, annotation)
 
         train_list, test_list = train_test_split(filename_list, test_size=0.33, random_state=42)
         train_out = ''
