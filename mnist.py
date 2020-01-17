@@ -8,8 +8,9 @@ def main():
     # data = np.dstack((train_data.reshape((28, 28, -1)), eval_data.reshape((28, 28, -1)))).reshape((-1, 28, 28))
     # labels = np.concatenate((train_labels, eval_labels))
     IG = ImageSampleGenerator('data/paper_photo', 'data/images/', 'data/labels/', train_data, train_labels, 28, 28,
-                              sample_type='jpg', invert_samples=True, mode='segment')
-    IG.generate_dataset(10, 10, True)
+                              sample_type='jpg', invert_samples=True, annotation_mode='box',
+                              aug_back=False, aug_result=True)
+    IG.generate_dataset(10, 10)
 
 
 if __name__ == "__main__":

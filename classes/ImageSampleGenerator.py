@@ -25,11 +25,11 @@ class ImageSampleGenerator:
         sample_y_size: height of samples
         sample_type: 'jpg' if samples have 3 channels, 'png' if samples have 4 channels
         invert_sample: if samples must be inverted before being placed
-        mode: if 'box', bounding boxes coordinates are returned as annotation; if 'segment', mask is returned as
+        annotation_mode: if 'box', bounding boxes coordinates are returned as annotation; if 'segment', mask is returned as
         annotation
     """
     def __init__(self, back_dir, output_img_dir, output_label_dir, sample_data, sample_labels, sample_x_size,
-                 sample_y_size, sample_type, invert_samples, mode):
+                 sample_y_size, sample_type, invert_samples, annotation_mode, aug_back, aug_result):
         self.aug_seq = iaa.Sequential([
             iaa.Sometimes(0.5,
                           iaa.GaussianBlur(sigma=(0, 0.5))
@@ -46,7 +46,9 @@ class ImageSampleGenerator:
         self.sample_labels = sample_labels
         self.sample_type = sample_type
         self.invert_samples = invert_samples
-        self.mode = mode
+        self.annotation_mode = annotation_mode
+        self.aug_back = aug_back
+        self.aug_result = aug_result
         back_list = []
         back_filename_list = os.listdir(back_dir)
         for back_file in back_filename_list:
@@ -86,9 +88,9 @@ class ImageSampleGenerator:
             print('Given sample type is not defined, use \'jpg\' or \'png\'')
             exit()
         back_img_part[non_white_pixels] = sample_img[non_white_pixels]
-        if self.mode == 'box':
+        if self.annotation_mode == 'box':
             return back_img_part
-        elif self.mode == 'segment':
+        elif self.annotation_mode == 'segment':
             return back_img_part, non_white_pixels
 
     def generate_random_coordinates(self, img_shape, coord_num):
@@ -129,7 +131,7 @@ class ImageSampleGenerator:
         """
         coord_list = self.generate_random_coordinates(back_img.shape, len(sample_list))
 
-        if self.mode == 'box':
+        if self.annotation_mode == 'box':
             annotation_list = []
             for i in range(0, len(sample_list)):
                 x = coord_list[i][0]
@@ -147,7 +149,7 @@ class ImageSampleGenerator:
                 annotation_list.append(label)
             return back_img, annotation_list
 
-        elif self.mode == 'segment':
+        elif self.annotation_mode == 'segment':
             annotation = np.zeros(back_img.shape)
             for i in range(0, len(sample_list)):
                 x_0 = coord_list[i][0]
@@ -163,7 +165,7 @@ class ImageSampleGenerator:
     def aug_image(self, image):
         return self.aug_seq(images=image)
 
-    def generate_dataset(self, img_count, sample_count, aug=True):
+    def generate_dataset(self, img_count, sample_count):
         """
         Generates an image set of given size by placing samples randomly on them and generating annotations in 2 modes:
         returning bounding boxes coordinates or returning segmentation masks.
@@ -179,17 +181,19 @@ class ImageSampleGenerator:
         filename_list = []
         for i in tqdm(range(img_count)):
             new_img = self.back_list[randint(0, len(self.back_list) - 1)].copy()
+            if self.aug_back:
+                new_img = self.aug_image(new_img)
             sample_index_list = [randint(0, self.sample_data.shape[0]-1) for a in range(sample_count)]
             sample_list = [self.sample_data[i] for i in sample_index_list]
             label_list = [self.sample_labels[i] for i in sample_index_list]
             gen_img, annotation = self.generate_image(new_img, sample_list, label_list)
-            if aug:
+            if self.aug_result:
                 gen_img = self.aug_image(gen_img)
             filename = os.path.join(self.output_img_dir, f'_{i}.jpg')
             filename_list.append(filename)
             cv2.imwrite(filename, gen_img)
 
-            if self.mode == 'box':
+            if self.annotation_mode == 'box':
                 label_filename = os.path.join(self.output_label_dir, f'_{i}.txt')
                 annotation = np.array(annotation)
                 annotation_df = pd.DataFrame({
@@ -200,7 +204,7 @@ class ImageSampleGenerator:
                     'height': np.around(annotation[:, 4], 5),
                 })
                 annotation_df.to_csv(label_filename, index=False, header=False, sep=' ')
-            elif self.mode == 'segment':
+            elif self.annotation_mode == 'segment':
                 label_filename = os.path.join(self.output_label_dir, f'_{i}.bmp')
                 cv2.imwrite(label_filename, annotation)
 
